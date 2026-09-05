@@ -40,6 +40,7 @@ pub(crate) struct DirectXRenderer {
     atlas: Arc<DirectXAtlas>,
     devices: Option<DirectXRendererDevices>,
     resources: Option<DirectXResources>,
+    external_textures: crate::external_texture_cache::ExternalTextureCache,
     globals: DirectXGlobalElements,
     pipelines: DirectXRenderPipelines,
     direct_composition: Option<DirectComposition>,
@@ -185,6 +186,7 @@ impl DirectXRenderer {
             atlas,
             devices: Some(devices),
             resources: Some(resources),
+            external_textures: Default::default(),
             globals,
             pipelines,
             direct_composition,
@@ -324,6 +326,7 @@ impl DirectXRenderer {
         scene: &Scene,
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
+        self.external_textures.prune();
         if self.skip_draws {
             // skip drawing this frame, we just recovered from a device lost event
             // and so likely do not have the textures anymore that are required for drawing
@@ -363,7 +366,10 @@ impl DirectXRenderer {
                 PrimitiveBatch::PolychromeSprites { texture_id, range } => {
                     self.draw_polychrome_sprites(texture_id, range.start, range.len())
                 }
-                PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
+                PrimitiveBatch::Surfaces(range) => {
+                    self.draw_surfaces(&scene.surfaces[range]);
+                    Ok(())
+                }
             }
             .with_context(|| {
                 format!(
@@ -725,11 +731,25 @@ impl DirectXRenderer {
         )
     }
 
-    fn draw_surfaces(&mut self, surfaces: &[PaintSurface]) -> Result<()> {
+    fn draw_surfaces(&mut self, surfaces: &[PaintSurface]) {
         if surfaces.is_empty() {
-            return Ok(());
+            return;
         }
-        Ok(())
+        let Some((devices, resources)) = self.devices.as_ref().zip(self.resources.as_ref()) else {
+            crate::external_texture::unavailable(surfaces.len(), "renderer resources missing");
+            return;
+        };
+        let Some(target) = resources.render_target.as_ref() else {
+            crate::external_texture::unavailable(surfaces.len(), "render target missing");
+            return;
+        };
+        crate::external_texture::draw(
+            &mut self.external_textures,
+            devices,
+            target,
+            &resources.render_target_view,
+            surfaces,
+        );
     }
 
     pub(crate) fn gpu_specs(&self) -> Result<GpuSpecs> {

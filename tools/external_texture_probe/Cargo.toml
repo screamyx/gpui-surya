@@ -1,0 +1,20 @@
+[package]
+name = "external_texture_probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+gpui = { path = "../../crates/gpui" }
+gpui_platform = { path = "../../crates/gpui_platform" }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Security"] }
+
+[[bin]]
+name = "external_texture_probe"
+path = "main.rs"
+
+[profile.dev]
+debug = 0

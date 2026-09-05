@@ -63,6 +63,7 @@ pub struct WindowsWindowState {
     pub direct_manipulation: DirectManipulationHandler,
 
     pub renderer: RefCell<DirectXRenderer>,
+    pub modal_loop_depth: Cell<u32>,
     /// Set after a GPU device-lost recovery so the next `draw_window` call is
     /// treated as a forced render. This guarantees the next frame both
     /// re-enables drawing (via `mark_drawable`) and bypasses the GPUI view
@@ -168,6 +169,7 @@ impl WindowsWindowState {
             last_reported_capslock: Cell::new(last_reported_capslock),
             hovered: Cell::new(hovered),
             renderer: RefCell::new(renderer),
+            modal_loop_depth: Cell::new(0),
             force_render_after_recovery: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
@@ -975,11 +977,17 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn draw(&self, scene: &Scene) {
-        self.state
+        let result = self.state
             .renderer
             .borrow_mut()
-            .draw(scene, self.state.background_appearance.get())
-            .log_err();
+            .draw(scene, self.state.background_appearance.get());
+        if let Err(error) = result {
+            log::error!("Drawing window failed: {error}");
+            if self.state.renderer.borrow().frame_gate().is_some() {
+                self.state.invalidate_devices
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {

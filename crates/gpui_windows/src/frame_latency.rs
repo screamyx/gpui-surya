@@ -7,7 +7,9 @@ use windows::Win32::Graphics::{Direct3D11::ID3D11Device, Dxgi::IDXGIDevice1};
 use windows::core::Interface;
 
 pub(crate) fn apply(device: &ID3D11Device) {
-    let Ok(value) = std::env::var("SURYA_FRAME_LATENCY") else { return };
+    let Ok(value) = std::env::var("SURYA_FRAME_LATENCY") else {
+        return;
+    };
     let Some(requested) = parse(&value) else {
         log::warn!("dxgi: SURYA_FRAME_LATENCY must be an integer from 1 through 16; unchanged");
         return;
@@ -20,10 +22,18 @@ pub(crate) fn apply(device: &ID3D11Device) {
         }
     })();
     match result {
-        Ok(actual) => log::info!(
-            "dxgi: frame_latency asked={requested} actual={actual} applied={}",
-            u8::from(actual == requested),
-        ),
+        Ok(actual) => {
+            if crate::present_gate::flags().0 != 0 {
+                log::info!(
+                    "dxgi: frame_latency asked={requested} device_readback={actual} effective_scope=swap_chain device_limit_effective=0; chain readback follows"
+                );
+            } else {
+                log::info!(
+                    "dxgi: frame_latency asked={requested} device_readback={actual} effective_scope=device effective_queue_latency={actual} applied={}",
+                    u8::from(actual == requested)
+                );
+            }
+        }
         Err(error) => log::warn!("dxgi: frame_latency asked={requested} unverified: {error}"),
     }
 }

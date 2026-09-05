@@ -1,4 +1,5 @@
 use std::{
+    rc::Rc,
     slice,
     sync::{Arc, OnceLock},
 };
@@ -68,7 +69,7 @@ pub(crate) struct DirectXRendererDevices {
 }
 
 struct DirectXResources {
-    present_gate: Option<crate::present_gate::PresentGate>,
+    present_gate: Option<Rc<crate::present_gate::PresentGate>>,
     // Direct3D rendering objects
     swap_chain: IDXGISwapChain1,
     render_target: Option<ID3D11Texture2D>,
@@ -257,11 +258,10 @@ impl DirectXRenderer {
         Ok(())
     }
 
-    pub(crate) fn before_frame(&mut self) -> bool {
+    pub(crate) fn frame_gate(&self) -> Option<Rc<crate::present_gate::PresentGate>> {
         self.resources
-            .as_mut()
-            .and_then(|resources| resources.present_gate.as_mut())
-            .is_none_or(|gate| gate.before_frame())
+            .as_ref()
+            .and_then(|resources| resources.present_gate.clone())
     }
 
     pub(crate) fn handle_device_lost(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
@@ -339,6 +339,18 @@ impl DirectXRenderer {
     }
 
     pub(crate) fn draw(
+        &mut self,
+        scene: &Scene,
+        background_appearance: WindowBackgroundAppearance,
+    ) -> Result<()> {
+        let result = self.draw_inner(scene, background_appearance);
+        if result.is_err() && let Some(gate) = self.frame_gate() {
+            gate.failed();
+        }
+        result
+    }
+
+    fn draw_inner(
         &mut self,
         scene: &Scene,
         background_appearance: WindowBackgroundAppearance,
@@ -421,6 +433,9 @@ impl DirectXRenderer {
         let resources = self.resources.as_mut().context("resources missing")?;
         resources.render_target.take();
         resources.render_target_view.take();
+        if let Some(gate) = &resources.present_gate {
+            gate.resized();
+        }
 
         // Resizing the swap chain requires a call to the underlying DXGI adapter, which can return the device removed error.
         // The app might have moved to a monitor that's attached to a different graphics device.

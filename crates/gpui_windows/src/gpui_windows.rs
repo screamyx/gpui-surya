@@ -16,6 +16,7 @@ mod frame_latency;
 mod keyboard;
 mod platform;
 mod present_gate;
+mod present_gate_state;
 mod system_notifications;
 mod system_settings;
 mod util;

@@ -247,14 +247,19 @@ impl DirectXRenderer {
                 .Present(0, DXGI_PRESENT(0))
         };
         result.ok().context("Presenting swap chain failed")?;
-        if let Some(gate) = self.resources.as_mut().and_then(|resources| resources.present_gate.as_mut()) {
+        if let Some(gate) = self
+            .resources
+            .as_mut()
+            .and_then(|resources| resources.present_gate.as_mut())
+        {
             gate.presented();
         }
         Ok(())
     }
 
     pub(crate) fn before_frame(&mut self) -> bool {
-        self.resources.as_mut()
+        self.resources
+            .as_mut()
             .and_then(|resources| resources.present_gate.as_mut())
             .is_none_or(|gate| gate.before_frame())
     }

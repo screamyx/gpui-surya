@@ -1,8 +1,9 @@
 # Waitable presentation experiment
 
 `SURYA_PRESENT_WAITABLE=1` creates a waitable DXGI swap chain. Unset keeps
-the existing creation flags and frame callback behavior. This branch starts
-at the fork's default branch independently of the device queue-limit PR.
+the existing creation flags and frame callback behavior. This head also
+contains the device queue-limit control, with a separate opt-in flag.
+Both flags are off by default; neither enables the other.
 
 The existing `VSyncProvider` already calls `DwmFlush` and invalidates each
 window. This experiment retains that provider and `Present(0, 0)`, then
@@ -33,9 +34,12 @@ display scans. Browser paint-to-surface timing excludes this earlier wait,
 so report the gate's wait totals separately when comparing application work.
 
 Validation: the new module compiled in the Windows API probe using this
-fork's `windows` 0.61.3 dependency (`WINPROBE_EXIT=0`). A full application
-build, first-frame/idle/resize/recovery checks, and the Windows measured
-pair remain pending. No performance improvement has been established.
+fork's `windows` 0.61.3 dependency (`WINPROBE_EXIT=0`). The independent
+present integration at app revision
+`b0c43c0cd368039694a51d316fa6bdbbce3129f2` passed a Windows release build
+with `--locked` (`BUILD_EXIT=0`). The combined head's application build,
+first-frame/idle/resize/recovery checks, and matched dtry numbers remain
+pending. No performance improvement has been established.
 
 API contracts:
 

@@ -1225,6 +1225,15 @@ impl WindowsWindowInner {
 
     #[inline]
     fn draw_window(&self, handle: HWND, force_render: bool) -> Option<isize> {
+        if !self.state.renderer.borrow_mut().before_frame() {
+            if force_render {
+                self.state.force_render_after_recovery.set(true);
+            }
+            // Retire this invalid region instead of spinning on WM_PAINT;
+            // VSyncProvider invalidates it again on the next display beat.
+            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            return Some(0);
+        }
         let mut request_frame = self.state.callbacks.request_frame.take()?;
 
         self.state.direct_manipulation.update();

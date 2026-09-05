@@ -68,6 +68,7 @@ pub(crate) struct DirectXRendererDevices {
 }
 
 struct DirectXResources {
+    present_gate: Option<crate::present_gate::PresentGate>,
     // Direct3D rendering objects
     swap_chain: IDXGISwapChain1,
     render_target: Option<ID3D11Texture2D>,
@@ -244,7 +245,17 @@ impl DirectXRenderer {
                 .swap_chain
                 .Present(0, DXGI_PRESENT(0))
         };
-        result.ok().context("Presenting swap chain failed")
+        result.ok().context("Presenting swap chain failed")?;
+        if let Some(gate) = self.resources.as_mut().and_then(|resources| resources.present_gate.as_mut()) {
+            gate.presented();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn before_frame(&mut self) -> bool {
+        self.resources.as_mut()
+            .and_then(|resources| resources.present_gate.as_mut())
+            .is_none_or(|gate| gate.before_frame())
     }
 
     pub(crate) fn handle_device_lost(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
@@ -417,7 +428,7 @@ impl DirectXRenderer {
                     width,
                     height,
                     RENDER_TARGET_FORMAT,
-                    DXGI_SWAP_CHAIN_FLAG(0),
+                    crate::present_gate::flags(),
                 )
                 .context("Failed to resize swap chain")?;
         }
@@ -831,8 +842,10 @@ impl DirectXResources {
             viewport,
         ) = create_resources(devices, &swap_chain, width, height)?;
         set_rasterizer_state(&devices.device, &devices.device_context)?;
+        let present_gate = crate::present_gate::PresentGate::new(&swap_chain)?;
 
         Ok(Self {
+            present_gate,
             swap_chain,
             render_target: Some(render_target),
             render_target_view,
@@ -1245,7 +1258,7 @@ fn create_swap_chain_for_composition(
         Scaling: DXGI_SCALING_STRETCH,
         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
         AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
-        Flags: 0,
+        Flags: crate::present_gate::flags().0 as u32,
     };
     Ok(unsafe { dxgi_factory.CreateSwapChainForComposition(device, &desc, None)? })
 }
@@ -1273,7 +1286,7 @@ fn create_swap_chain(
         Scaling: DXGI_SCALING_NONE,
         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
         AlphaMode: DXGI_ALPHA_MODE_IGNORE,
-        Flags: 0,
+        Flags: crate::present_gate::flags().0 as u32,
     };
     let swap_chain =
         unsafe { dxgi_factory.CreateSwapChainForHwnd(device, hwnd, &desc, None, None) }?;

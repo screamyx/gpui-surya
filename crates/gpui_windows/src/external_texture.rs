@@ -7,7 +7,7 @@ use anyhow::{Context, Result, ensure};
 use gpui::{ExternalTextureSync, PaintSurface};
 use windows::{
     Win32::{
-        Foundation::{HANDLE, S_OK},
+        Foundation::S_OK,
         Graphics::{
             Direct3D11::*,
             Dxgi::{Common::*, *},
@@ -16,14 +16,23 @@ use windows::{
     core::Interface,
 };
 
-use crate::directx_renderer::DirectXRendererDevices;
+use crate::{
+    directx_renderer::DirectXRendererDevices, external_texture_cache::ExternalTextureCache,
+};
 
 static ASKED: AtomicU64 = AtomicU64::new(0);
 static PAINTED: AtomicU64 = AtomicU64::new(0);
 static CLIPPED: AtomicU64 = AtomicU64::new(0);
 static DROPPED: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn unavailable(count: usize, reason: &str) {
+    let asked = ASKED.fetch_add(count as u64, Ordering::Relaxed) + count as u64;
+    let dropped = DROPPED.fetch_add(count as u64, Ordering::Relaxed) + count as u64;
+    log::error!("external texture: asked={asked} dropped={dropped} error={reason}");
+}
+
 pub(crate) fn draw(
+    cache: &mut ExternalTextureCache,
     devices: &DirectXRendererDevices,
     target: &ID3D11Texture2D,
     target_view: &Option<ID3D11RenderTargetView>,
@@ -34,7 +43,7 @@ pub(crate) fn draw(
     for surface in surfaces {
         let asked = ASKED.fetch_add(1, Ordering::Relaxed) + 1;
         let started = std::time::Instant::now();
-        match draw_one(devices, target, target_view, surface) {
+        match draw_one(cache, devices, target, target_view, surface) {
             Ok(true) => {
                 PAINTED.fetch_add(1, Ordering::Relaxed);
             }
@@ -68,26 +77,18 @@ pub(crate) fn draw(
 }
 
 fn draw_one(
+    cache: &mut ExternalTextureCache,
     devices: &DirectXRendererDevices,
     target: &ID3D11Texture2D,
     target_view: &Option<ID3D11RenderTargetView>,
     surface: &PaintSurface,
 ) -> Result<bool> {
     let owner = &surface.external_texture;
-    let adapter = unsafe { devices.adapter.GetDesc1() }?;
-    ensure!(
-        owner.adapter_luid() == (adapter.AdapterLuid.LowPart, adapter.AdapterLuid.HighPart),
-        "external texture adapter LUID differs from renderer"
-    );
-    let device: ID3D11Device1 = devices.device.cast()?;
-    // The scene owns the NT handle through this open and the submitted copy.
-    let texture =
-        unsafe { device.OpenSharedResource1::<ID3D11Texture2D>(HANDLE(owner.as_raw_handle())) }
-            .context("open owned NT texture")?;
-    let mut source = D3D11_TEXTURE2D_DESC::default();
+    let opened = cache.get(devices, owner)?;
+    let texture = &opened.texture;
+    let source = opened.descriptor;
     let mut destination = D3D11_TEXTURE2D_DESC::default();
     unsafe {
-        texture.GetDesc(&mut source);
         target.GetDesc(&mut destination);
     }
     validate_descriptor(&source, owner.size())?;
@@ -95,19 +96,14 @@ fn draw_one(
         destination.Format == source.Format && destination.SampleDesc.Count == 1,
         "external texture requires a matching BGRA8 single-sample render target"
     );
-    ensure!(
-        surface.bounds.size.width.0 == source.Width as f32
-            && surface.bounds.size.height.0 == source.Height as f32,
-        "external texture bounds must match device-pixel dimensions (scaling unsupported)"
-    );
     let bounds = surface.bounds;
     let mask = surface.content_mask.bounds;
     let Some(region) = copy_region(
         [
             bounds.origin.x.0,
             bounds.origin.y.0,
-            bounds.size.width.0,
-            bounds.size.height.0,
+            bounds.size.width.0.min(source.Width as f32),
+            bounds.size.height.0.min(source.Height as f32),
         ],
         [
             mask.origin.x.0,
@@ -139,7 +135,7 @@ fn draw_one(
             region.x,
             region.y,
             0,
-            &texture,
+            texture,
             0,
             Some(&region.source),
         );

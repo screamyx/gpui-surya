@@ -2,6 +2,7 @@ use super::*;
 use crate::directx_devices::DirectXDevices;
 use gpui::{Bounds, ContentMask, ExternalTexture, ScaledPixels, point, size};
 use std::os::windows::io::{FromRawHandle, OwnedHandle};
+use windows::Win32::Foundation::HANDLE;
 
 fn descriptor(width: u32, height: u32, shared: bool) -> D3D11_TEXTURE2D_DESC {
     D3D11_TEXTURE2D_DESC {
@@ -80,9 +81,9 @@ fn shared_texture_draws_clipped_pixels_after_producer_owner_drops() -> Result<()
     };
     let surface = PaintSurface {
         order: 0,
-        bounds: bounds(-2.0, 3.0, 8.0, 8.0),
+        bounds: bounds(-2.0, 3.0, 9.0, 8.0),
         content_mask: ContentMask {
-            bounds: bounds(2.0, 4.0, 4.0, 3.0),
+            bounds: bounds(2.0, 4.0, 12.0, 3.0),
         },
         external_texture: owner.clone(),
     };
@@ -109,15 +110,34 @@ fn shared_texture_draws_clipped_pixels_after_producer_owner_drops() -> Result<()
     let result = unsafe { (mutex.vtable().AcquireSync)(mutex.as_raw(), 0, 5000) };
     ensure!(result == S_OK, "test producer completion: {result:?}");
     unsafe { mutex.ReleaseSync(0) }?;
+    let mut cache = ExternalTextureCache::default();
     let mut completed = 0;
     for _ in 0..32 {
-        assert!(draw_one(&consumer, &target, &target_view, &surface)?);
+        assert!(draw_one(
+            &mut cache,
+            &consumer,
+            &target,
+            &target_view,
+            &surface
+        )?);
         completed += 1;
         // Complete reads before reacquiring key 0 on another opened wrapper.
         unsafe {
             consumer.device_context.Flush();
         }
     }
+    assert_eq!(
+        cache.len(),
+        1,
+        "one open for repeated draws of the same owner"
+    );
+    let retained = surface.external_texture.clone();
+    drop(surface);
+    cache.prune();
+    assert_eq!(cache.len(), 1, "another scene clone keeps the cache alive");
+    drop(retained);
+    cache.prune();
+    assert_eq!(cache.len(), 0, "cache must not retain a retired allocation");
     let staging = create_texture(
         &consumer.device,
         &D3D11_TEXTURE2D_DESC {

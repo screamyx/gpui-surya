@@ -2,7 +2,7 @@
 
 use std::{
     os::windows::io::{AsRawHandle, OwnedHandle, RawHandle},
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 
 /// Synchronization required before the renderer reads a shared texture.
@@ -63,6 +63,12 @@ impl ExternalTexture {
     /// Borrow the NT handle. It remains valid while this owner is alive.
     pub fn as_raw_handle(&self) -> RawHandle {
         self.handle.as_raw_handle()
+    }
+
+    /// A weak owner for backend caches, which must not extend scene lifetime.
+    #[doc(hidden)]
+    pub fn downgrade_handle(&self) -> Weak<OwnedHandle> {
+        Arc::downgrade(&self.handle)
     }
 
     /// The originating adapter's `(LowPart, HighPart)` LUID.

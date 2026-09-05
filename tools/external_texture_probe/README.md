@@ -37,9 +37,12 @@ be used after that callback. A duplicated handle does not freeze pooled pixels.
 blocking and skips the surface on any result other than exact `S_OK`, including
 the positive HRESULT values `WAIT_TIMEOUT` and `WAIT_ABANDONED`.
 
-The scene retains a clone of the handle owner. The renderer checks adapter LUID,
-actual format/size, and destination size, then performs a clipped GPU copy.
-This first entry is opaque and rectangular with device pixels copied 1:1. It
+The scene retains a clone of the handle owner. The renderer checks adapter LUID
+and actual format/size, then copies the intersection of bounds and source pixels.
+Opened textures are cached by weak Arc owner identity and device, never by
+handle value. Retired owners are pruned even on frames without surfaces.
+This first entry is opaque and rectangular with device pixels copied 1:1.
+DPI rounding or resize differences are cropped without rejecting the surface. It
 does not implement scaling, corner radii, global opacity, or edge fades. No
 CPU pixels, sprite-atlas uploads, GPU-facing struct changes, or shader changes.
 
@@ -55,6 +58,8 @@ may still be reading it. A future reusable pool needs explicit synchronization.
 - Tests: `5 passed; 0 failed`, including `asked=32 frames=32 dropped=0` and
   `pixels_asked=256 pixels_matched=256` in the GPU clipping/ownership test.
 - The mutex test verifies a key-0 timeout cannot count as an acquired lock.
+- The readback test also covers bounds larger than the available texture and
+  verifies cache reuse plus retirement after the final owner drops.
 
 These counters prove the synthetic texture entry. CEF page rendering, callback
 cost, resizing under load, and default CPU fallback are separate application

@@ -11,6 +11,7 @@ mod dispatcher;
 mod display;
 mod events;
 mod external_texture;
+mod external_texture_cache;
 mod keyboard;
 mod platform;
 mod system_notifications;

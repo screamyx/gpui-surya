@@ -1,4 +1,5 @@
 use std::{
+    rc::Rc,
     slice,
     sync::{Arc, OnceLock},
 };
@@ -68,6 +69,7 @@ pub(crate) struct DirectXRendererDevices {
 }
 
 struct DirectXResources {
+    present_gate: Option<Rc<crate::present_gate::PresentGate>>,
     // Direct3D rendering objects
     swap_chain: IDXGISwapChain1,
     render_target: Option<ID3D11Texture2D>,
@@ -137,6 +139,7 @@ impl DirectXRendererDevices {
             Some(device.cast().context("Creating DXGI device")?)
         };
         let annotation = device_context.cast().ok();
+        crate::frame_latency::apply(device);
 
         Ok(Self {
             adapter: adapter.clone(),
@@ -244,7 +247,21 @@ impl DirectXRenderer {
                 .swap_chain
                 .Present(0, DXGI_PRESENT(0))
         };
-        result.ok().context("Presenting swap chain failed")
+        result.ok().context("Presenting swap chain failed")?;
+        if let Some(gate) = self
+            .resources
+            .as_mut()
+            .and_then(|resources| resources.present_gate.as_mut())
+        {
+            gate.presented();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn frame_gate(&self) -> Option<Rc<crate::present_gate::PresentGate>> {
+        self.resources
+            .as_ref()
+            .and_then(|resources| resources.present_gate.clone())
     }
 
     pub(crate) fn handle_device_lost(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
@@ -322,6 +339,18 @@ impl DirectXRenderer {
     }
 
     pub(crate) fn draw(
+        &mut self,
+        scene: &Scene,
+        background_appearance: WindowBackgroundAppearance,
+    ) -> Result<()> {
+        let result = self.draw_inner(scene, background_appearance);
+        if result.is_err() && let Some(gate) = self.frame_gate() {
+            gate.failed();
+        }
+        result
+    }
+
+    fn draw_inner(
         &mut self,
         scene: &Scene,
         background_appearance: WindowBackgroundAppearance,
@@ -404,6 +433,9 @@ impl DirectXRenderer {
         let resources = self.resources.as_mut().context("resources missing")?;
         resources.render_target.take();
         resources.render_target_view.take();
+        if let Some(gate) = &resources.present_gate {
+            gate.resized();
+        }
 
         // Resizing the swap chain requires a call to the underlying DXGI adapter, which can return the device removed error.
         // The app might have moved to a monitor that's attached to a different graphics device.
@@ -417,7 +449,7 @@ impl DirectXRenderer {
                     width,
                     height,
                     RENDER_TARGET_FORMAT,
-                    DXGI_SWAP_CHAIN_FLAG(0),
+                    crate::present_gate::flags(),
                 )
                 .context("Failed to resize swap chain")?;
         }
@@ -831,8 +863,10 @@ impl DirectXResources {
             viewport,
         ) = create_resources(devices, &swap_chain, width, height)?;
         set_rasterizer_state(&devices.device, &devices.device_context)?;
+        let present_gate = crate::present_gate::PresentGate::new(&swap_chain)?;
 
         Ok(Self {
+            present_gate,
             swap_chain,
             render_target: Some(render_target),
             render_target_view,
@@ -1245,7 +1279,7 @@ fn create_swap_chain_for_composition(
         Scaling: DXGI_SCALING_STRETCH,
         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
         AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
-        Flags: 0,
+        Flags: crate::present_gate::flags().0 as u32,
     };
     Ok(unsafe { dxgi_factory.CreateSwapChainForComposition(device, &desc, None)? })
 }
@@ -1273,7 +1307,7 @@ fn create_swap_chain(
         Scaling: DXGI_SCALING_NONE,
         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
         AlphaMode: DXGI_ALPHA_MODE_IGNORE,
-        Flags: 0,
+        Flags: crate::present_gate::flags().0 as u32,
     };
     let swap_chain =
         unsafe { dxgi_factory.CreateSwapChainForHwnd(device, hwnd, &desc, None, None) }?;

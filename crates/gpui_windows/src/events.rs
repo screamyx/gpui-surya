@@ -224,6 +224,8 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_move_loop(&self, handle: HWND) -> Option<isize> {
+        self.state.modal_loop_depth
+            .set(self.state.modal_loop_depth.get().saturating_add(1));
         unsafe {
             let ret = SetTimer(
                 Some(handle),
@@ -242,6 +244,8 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_move_loop_exit(&self, handle: HWND) -> Option<isize> {
+        self.state.modal_loop_depth
+            .set(self.state.modal_loop_depth.get().saturating_sub(1));
         unsafe {
             KillTimer(Some(handle), SIZE_MOVE_LOOP_TIMER_ID).log_err();
         }
@@ -1245,10 +1249,41 @@ impl WindowsWindowInner {
             // will rebuild the scene with fresh atlas textures.
             self.state.renderer.borrow_mut().mark_drawable();
         }
+        let gate = if crate::present_gate::flags().0 != 0 {
+            self.state.renderer.borrow().frame_gate()
+        } else {
+            None
+        };
+        let permit = if let Some(gate) = &gate {
+            let permit = gate.begin_frame(
+                self.state.display.get().frame_wait_millis(),
+                self.state.modal_loop_depth.get() != 0,
+            );
+            let current = self.state.renderer.borrow().frame_gate();
+            let unchanged = current.as_ref()
+                .is_some_and(|current| Rc::ptr_eq(current, gate));
+            if permit.is_none() || !unchanged {
+                if force_render || !unchanged {
+                    self.state.force_render_after_recovery.set(true);
+                }
+                if gate.is_faulted() {
+                    self.state.invalidate_devices.store(true, Ordering::Release);
+                }
+                self.state.callbacks.request_frame.set(Some(request_frame));
+                // Retire this paint; the outer loop handles posted input and
+                // VSyncProvider invalidates again on the next display beat.
+                unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+                return Some(0);
+            }
+            permit
+        } else {
+            None
+        };
         request_frame(RequestFrameOptions {
             require_presentation: false,
             force_render,
         });
+        drop(permit);
 
         self.state.callbacks.request_frame.set(Some(request_frame));
         self.update_ime_enabled(handle);

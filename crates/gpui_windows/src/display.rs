@@ -27,6 +27,7 @@ pub(crate) struct WindowsDisplay {
     visible_bounds: Bounds<Pixels>,
     physical_bounds: Bounds<DevicePixels>,
     uuid: Uuid,
+    frame_wait_millis: u32,
 }
 
 // The `HMONITOR` is thread-safe.
@@ -71,6 +72,7 @@ impl WindowsDisplay {
                 size: physical_size,
             },
             uuid,
+            frame_wait_millis: frame_wait_millis(&info.szDevice),
         })
     }
 
@@ -120,6 +122,10 @@ impl WindowsDisplay {
                 )
             })
             .collect()
+    }
+
+    pub(crate) fn frame_wait_millis(&self) -> u32 {
+        self.frame_wait_millis
     }
 
     pub fn physical_bounds(&self) -> Bounds<DevicePixels> {
@@ -201,4 +207,21 @@ fn get_scale_factor_for_monitor(monitor: HMONITOR) -> Result<f32> {
     unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) }?;
     assert_eq!(dpi_x, dpi_y);
     Ok(dpi_x as f32 / USER_DEFAULT_SCREEN_DPI as f32)
+}
+
+fn frame_wait_millis(device_name: &[u16]) -> u32 {
+    if crate::present_gate::flags().0 == 0 {
+        return 0;
+    }
+    let mut mode = DEVMODEW {
+        dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+        ..Default::default()
+    };
+    if unsafe {
+        EnumDisplaySettingsW(PCWSTR(device_name.as_ptr()), ENUM_CURRENT_SETTINGS, &mut mode)
+    }.as_bool() {
+        crate::present_gate_state::wait_millis(mode.dmDisplayFrequency)
+    } else {
+        0
+    }
 }

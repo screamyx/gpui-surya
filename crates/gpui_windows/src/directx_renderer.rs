@@ -729,6 +729,14 @@ impl DirectXRenderer {
         if surfaces.is_empty() {
             return Ok(());
         }
+        let devices = self.devices.as_ref().context("devices missing")?;
+        let resources = self.resources.as_ref().context("resources missing")?;
+        crate::external_texture::draw(
+            devices,
+            resources.render_target.as_ref().context("render target missing")?,
+            &resources.render_target_view,
+            surfaces,
+        );
         Ok(())
     }
 

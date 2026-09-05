@@ -4537,6 +4537,25 @@ impl Window {
         Ok(())
     }
 
+    /// Paint an opaque external BGRA texture at the current z-index on Windows.
+    ///
+    /// Call during element paint. The scene retains an owner until it is retired.
+    /// This initial path copies device pixels 1:1 with rectangular content-mask
+    /// clipping; bounds must match the texture size after DPI scaling. It does
+    /// not apply corner radii, opacity, edge fades, or image scaling.
+    #[cfg(target_os = "windows")]
+    pub fn paint_external_texture(&mut self, bounds: Bounds<Pixels>, texture: &crate::ExternalTexture) {
+        self.invalidator.debug_assert_paint();
+        let bounds = self.snap_bounds(bounds);
+        let content_mask = self.snapped_content_mask();
+        self.next_frame.scene.insert_primitive(crate::PaintSurface {
+            order: 0,
+            bounds,
+            content_mask,
+            external_texture: texture.clone(),
+        });
+    }
+
     /// Paint a surface into the scene for the next frame at the current z-index.
     ///
     /// This method should only be called as part of the paint phase of element drawing.

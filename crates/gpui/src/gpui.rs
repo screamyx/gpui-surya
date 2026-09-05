@@ -45,6 +45,8 @@ pub mod profiler;
 ))]
 #[expect(missing_docs)]
 pub mod queue;
+#[cfg(target_os = "windows")]
+mod external_texture;
 mod scene;
 mod shared_uri;
 mod style;
@@ -142,6 +144,8 @@ pub use profiler::*;
 #[cfg(any(target_os = "windows", target_os = "linux", target_family = "wasm"))]
 pub use queue::{PriorityQueueReceiver, PriorityQueueSender};
 pub use refineable::*;
+#[cfg(target_os = "windows")]
+pub use external_texture::*;
 pub use scene::*;
 pub use shared_uri::*;
 use std::{any::Any, future::Future};

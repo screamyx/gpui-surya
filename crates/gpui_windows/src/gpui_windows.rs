@@ -19,6 +19,7 @@ mod system_notifications;
 mod system_settings;
 mod util;
 mod vsync;
+mod present_gate;
 mod window;
 mod wrapper;
 

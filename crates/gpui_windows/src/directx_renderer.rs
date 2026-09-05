@@ -137,6 +137,7 @@ impl DirectXRendererDevices {
             Some(device.cast().context("Creating DXGI device")?)
         };
         let annotation = device_context.cast().ok();
+        crate::frame_latency::apply(device);
 
         Ok(Self {
             adapter: adapter.clone(),

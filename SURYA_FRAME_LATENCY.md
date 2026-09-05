@@ -17,6 +17,6 @@ its unchanged control. `Present` timing and the device queue limit are separate
 levers; this patch changes only the latter.
 
 Validation so far: the module compiled for `x86_64-pc-windows-msvc` in the
-Astra API probe (`windows` 0.62.2, `WINPROBE_EXIT=0`). Full application build,
+Astra API probe (`windows` 0.61.3, matching this fork's 0.61 dependency, `WINPROBE_EXIT=0`). Full application build,
 Windows runtime readback, and the paired cadence measurements are pending.
 Do not treat the cross compile as RC proof.
